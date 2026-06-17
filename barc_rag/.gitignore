@@ -1,0 +1,13 @@
+.env
+*.pyc
+__pycache__/
+*.egg-info/
+.DS_Store
+ingest_log.db
+qdrant_storage/
+pg_data/
+.venv/
+venv/
+env/
+*.db
+.streamlit/
