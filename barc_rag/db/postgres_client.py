@@ -3,7 +3,6 @@ PostgreSQL database client for managing document metadata and chunks.
 """
 
 import psycopg2
-from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 from config import POSTGRES_DSN
@@ -26,7 +25,6 @@ class PostgresDB:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        # Create documents table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS documents (
                 doc_id TEXT PRIMARY KEY,
@@ -36,7 +34,6 @@ class PostgresDB:
             )
         """)
 
-        # Create chunks table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS chunks (
                 chunk_id TEXT PRIMARY KEY,
@@ -44,13 +41,18 @@ class PostgresDB:
                 type TEXT NOT NULL,
                 page_number INT,
                 content TEXT NOT NULL,
+                original_content TEXT,
                 token_count INT,
                 source_file TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
-        # Create index on doc_id for faster queries
+        # Safely add original_content if table already existed without it
+        cursor.execute("""
+            ALTER TABLE chunks ADD COLUMN IF NOT EXISTS original_content TEXT
+        """)
+
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id)
         """)
@@ -61,12 +63,6 @@ class PostgresDB:
         print("PostgreSQL tables initialized")
 
     def insert_document(self, doc_metadata: Dict[str, Any]):
-        """
-        Insert document metadata.
-
-        Args:
-            doc_metadata: {doc_id, filename, total_pages}
-        """
         conn = self._get_connection()
         cursor = conn.cursor()
 
@@ -74,26 +70,24 @@ class PostgresDB:
             INSERT INTO documents (doc_id, filename, total_pages)
             VALUES (%s, %s, %s)
             ON CONFLICT (doc_id) DO NOTHING
-        """, (doc_metadata["doc_id"], doc_metadata["filename"], doc_metadata.get("total_pages")))
+        """, (
+            doc_metadata["doc_id"],
+            doc_metadata["filename"],
+            doc_metadata.get("total_pages")
+        ))
 
         conn.commit()
         cursor.close()
         conn.close()
 
     def insert_chunks(self, chunks: List[Dict[str, Any]]):
-        """
-        Insert chunks in bulk.
-
-        Args:
-            chunks: List of chunk dictionaries
-        """
         conn = self._get_connection()
         cursor = conn.cursor()
 
         for chunk in chunks:
             cursor.execute("""
-                INSERT INTO chunks (chunk_id, doc_id, type, page_number, content, token_count, source_file)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO chunks (chunk_id, doc_id, type, page_number, content, original_content, token_count, source_file)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (chunk_id) DO NOTHING
             """, (
                 chunk["chunk_id"],
@@ -101,6 +95,7 @@ class PostgresDB:
                 chunk["type"],
                 chunk["page_number"],
                 chunk["content"],
+                chunk.get("original_content"),
                 chunk["token_count"],
                 chunk["source_file"]
             ))
@@ -110,12 +105,11 @@ class PostgresDB:
         conn.close()
 
     def get_chunk_by_id(self, chunk_id: str) -> Optional[Dict[str, Any]]:
-        """Get a chunk by its ID."""
         conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute("""
-            SELECT chunk_id, doc_id, type, page_number, content, token_count, source_file
+            SELECT chunk_id, doc_id, type, page_number, content, original_content, token_count, source_file
             FROM chunks WHERE chunk_id = %s
         """, (chunk_id,))
 
@@ -130,18 +124,18 @@ class PostgresDB:
                 "type": row[2],
                 "page_number": row[3],
                 "content": row[4],
-                "token_count": row[5],
-                "source_file": row[6]
+                "original_content": row[5],
+                "token_count": row[6],
+                "source_file": row[7]
             }
         return None
 
     def get_all_chunks(self) -> List[Dict[str, Any]]:
-        """Get all chunks (for building BM25 index)."""
         conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute("""
-            SELECT chunk_id, doc_id, type, page_number, content, token_count, source_file
+            SELECT chunk_id, doc_id, type, page_number, content, original_content, token_count, source_file
             FROM chunks
         """)
 
@@ -149,21 +143,18 @@ class PostgresDB:
         cursor.close()
         conn.close()
 
-        chunks = []
-        for row in rows:
-            chunks.append({
-                "chunk_id": row[0],
-                "doc_id": row[1],
-                "type": row[2],
-                "page_number": row[3],
-                "content": row[4],
-                "token_count": row[5],
-                "source_file": row[6]
-            })
-        return chunks
+        return [{
+            "chunk_id": row[0],
+            "doc_id": row[1],
+            "type": row[2],
+            "page_number": row[3],
+            "content": row[4],
+            "original_content": row[5],
+            "token_count": row[6],
+            "source_file": row[7]
+        } for row in rows]
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get database statistics."""
         conn = self._get_connection()
         cursor = conn.cursor()
 

@@ -8,6 +8,7 @@ from typing import Dict, Any, List
 from retrieval.hybrid_retriever import HybridRetriever
 from retrieval.reranker import Reranker
 from llm.grok_client import GrokClient
+from db.postgres_client import PostgresDB
 
 
 class RAGPipeline:
@@ -18,6 +19,7 @@ class RAGPipeline:
         self.retriever = HybridRetriever()
         self.reranker = Reranker()
         self.llm = GrokClient()
+        self.postgres = PostgresDB()
 
     def query(self, user_question: str) -> Dict[str, Any]:
         """
@@ -46,17 +48,31 @@ class RAGPipeline:
         # 2. Rerank to top 5
         reranked_chunks = self.reranker.rerank(user_question, retrieved_chunks, top_k=5)
 
-        # 3. Generate answer with Grok
-        answer = self.llm.generate(user_question, reranked_chunks)
+        # 3. Prepare context: fetch original_content for tables
+        context_chunks = []
+        for chunk in reranked_chunks:
+            chunk_id = chunk.get("chunk_id")
+            chunk_type = chunk["payload"].get("type", "text")
+            
+            # For tables, fetch original_content from Postgres
+            if chunk_type == "table":
+                db_chunk = self.postgres.get_chunk_by_id(chunk_id)
+                if db_chunk and db_chunk.get("original_content"):
+                    chunk["payload"]["content"] = db_chunk["original_content"]
+            
+            context_chunks.append(chunk)
 
-        # 4. Extract source information
+        # 4. Generate answer with Grok
+        answer = self.llm.generate(user_question, context_chunks)
+
+        # 5. Extract source information
         doc_ids = list(set([
-            c["payload"].get("doc_id", "") for c in reranked_chunks
+            c["payload"].get("doc_id", "") for c in context_chunks
             if "payload" in c
         ]))
 
         return {
             "answer": answer,
-            "source_chunks": reranked_chunks,
+            "source_chunks": context_chunks,
             "doc_ids": doc_ids
         }

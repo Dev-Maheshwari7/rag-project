@@ -57,6 +57,17 @@ def parse_document(file_path: str) -> List[Dict[str, Any]]:
         elif element_type == "Table":
             # Try to get HTML or text representation
             table_content = element.metadata.text_as_html if hasattr(element.metadata, "text_as_html") else str(element)
+            print(f"[DEBUG] Found table element in {file_path_obj.name}")
+            elements.append({
+                "type": "table",
+                "content": table_content,
+                "page_number": getattr(element.metadata, "page_number", 1),
+                "source_file": file_path_obj.name,
+                "metadata": element.metadata.to_dict() if hasattr(element.metadata, "to_dict") else {}
+            })
+        else:
+            # Log unexpected element types
+            print(f"[DEBUG] Skipping element type: {element_type}")
 
             elements.append({
                 "type": "table",

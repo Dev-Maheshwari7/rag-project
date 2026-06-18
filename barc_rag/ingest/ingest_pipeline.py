@@ -8,7 +8,10 @@ import sqlite3
 from pathlib import Path
 from typing import List
 from tqdm import tqdm
+import sys
+from pathlib import Path
 
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from config import DOCS_DIR, INGEST_LOG_DB
 from ingest.parser import parse_document
 from ingest.chunker import chunk_elements
@@ -96,26 +99,26 @@ class IngestPipeline:
                 # Chunk
                 chunks = chunk_elements(elements)
 
-                # Embed
-                chunks_with_embeddings = self.embedder.embed_chunks(chunks)
+                # Embed (returns both embedding tuples for Qdrant and processed chunks for Postgres)
+                chunks_with_embeddings, processed_chunks = self.embedder.embed_chunks(chunks)
 
                 # Upsert to Qdrant
                 self.qdrant.upsert_chunks(chunks_with_embeddings)
 
-                # Insert to Postgres
+                # Insert to Postgres (use processed_chunks which have original_content)
                 doc_metadata = {
                     "doc_id": file_path.name,  # Use full filename to match chunker
                     "filename": file_path.name,
-                    "total_pages": max([c.get("page_number", 1) for c in chunks], default=1)
+                    "total_pages": max([c.get("page_number", 1) for c in processed_chunks], default=1)
                 }
                 self.postgres.insert_document(doc_metadata)
-                self.postgres.insert_chunks(chunks)
+                self.postgres.insert_chunks(processed_chunks)
 
                 # Mark as ingested
                 self._mark_ingested(str(file_path))
 
                 stats["ingested_files"] += 1
-                stats["total_chunks"] += len(chunks)
+                stats["total_chunks"] += len(processed_chunks)
 
             except Exception as e:
                 print(f"Error ingesting {file_path}: {e}")
