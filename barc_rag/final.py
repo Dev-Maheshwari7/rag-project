@@ -69,7 +69,12 @@ def create_ai_enhanced_summary(text: str, tables: List[str]) -> str:
     """Create AI-enhanced searchable summary for text + tables"""
 
     try:
-        llm = ChatGroq(model="qwen/qwen3-32b", temperature=0)
+        llm = ChatGroq(
+                model="qwen/qwen3-32b",
+                temperature=0,
+                reasoning_format="hidden",
+                reasoning_effort="none",
+            )
 
         prompt_text = f"""
 You are creating a searchable description for a document retrieval / RAG system.
